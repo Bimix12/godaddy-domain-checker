@@ -36,11 +36,12 @@ export default function BulkDomainChecker() {
 
         const data = await response.json();
         
-        // Collect only taken domains
+        // Collect only taken domains from this batch
+        const batchTakenDomains = [];
         data.results.forEach(result => {
           result.extensions.forEach(ext => {
             if (!ext.available) {
-              allTakenDomains.push({
+              batchTakenDomains.push({
                 domain: ext.domain,
                 status: 'TAKEN'
               });
@@ -48,7 +49,14 @@ export default function BulkDomainChecker() {
           });
         });
         
-        setResults([...allTakenDomains]);
+        // Add new taken domains to the list
+        allTakenDomains.push(...batchTakenDomains);
+        
+        // Update results with current list (avoid duplicates)
+        const uniqueDomains = Array.from(
+          new Map(allTakenDomains.map(item => [item.domain, item])).values()
+        );
+        setResults([...uniqueDomains]);
         
         // Short delay between batches
         if (i + batchSize < domainList.length) {
