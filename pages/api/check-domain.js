@@ -40,12 +40,13 @@ export default async function handler(req, res) {
       return cleanedDomain;
     }
 
-    // Function basita bach ncheck domain
+    // Function basita bach ncheck domain using multiple methods
     async function checkSingleDomain(domain) {
+      // Method 1: Check with HTTP request
+      let httpCheck = { available: true, method: 'http' };
       try {
-        // Njarrbu n-fetch l'domain
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const timeoutId = setTimeout(() => controller.abort(), 2000); // Reduced timeout
         
         const response = await fetch(`https://${domain}`, {
           method: 'HEAD',
@@ -57,13 +58,76 @@ export default async function handler(req, res) {
         
         clearTimeout(timeoutId);
         
-        // Ila response jat, domain taken
-        return { available: false, status: 'taken' };
+        // Ila response jat o status code mzyan, domain taken
+        if (response.status >= 200 && response.status < 400) {
+          httpCheck = { available: false, method: 'http', status: response.status };
+        }
         
       } catch (error) {
-        // Ila error jat, domain available (probably)
-        return { available: true, status: 'available' };
+        // HTTP failed, might be available
+        httpCheck = { available: true, method: 'http', error: error.name };
       }
+
+      // Method 2: Try HTTPS with www
+      let wwwCheck = { available: true, method: 'www' };
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        
+        const response = await fetch(`https://www.${domain}`, {
+          method: 'HEAD',
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; DomainChecker/1.0)'
+          }
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (response.status >= 200 && response.status < 400) {
+          wwwCheck = { available: false, method: 'www', status: response.status };
+        }
+        
+      } catch (error) {
+        wwwCheck = { available: true, method: 'www', error: error.name };
+      }
+
+      // Method 3: Try HTTP (not HTTPS)
+      let httpPlainCheck = { available: true, method: 'http-plain' };
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        
+        const response = await fetch(`http://${domain}`, {
+          method: 'HEAD',
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; DomainChecker/1.0)'
+          }
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (response.status >= 200 && response.status < 400) {
+          httpPlainCheck = { available: false, method: 'http-plain', status: response.status };
+        }
+        
+      } catch (error) {
+        httpPlainCheck = { available: true, method: 'http-plain', error: error.name };
+      }
+
+      // Decision logic: Ila chi method galt domain taken, consideriha taken
+      const isTaken = !httpCheck.available || !wwwCheck.available || !httpPlainCheck.available;
+      
+      return { 
+        available: !isTaken, 
+        status: isTaken ? 'taken' : 'available',
+        checks: {
+          https: httpCheck,
+          www: wwwCheck,
+          http: httpPlainCheck
+        }
+      };
     }
 
     // Process kol domain
@@ -98,8 +162,8 @@ export default async function handler(req, res) {
             status: result.status
           });
           
-          // Small delay bach ma-noverload-ch
-          await new Promise(resolve => setTimeout(resolve, 150));
+          // Small delay bach ma-noverload-ch (reduced delay)
+          await new Promise(resolve => setTimeout(resolve, 100));
           
         } catch (error) {
           // Ila error, nconsideraw domain taken
