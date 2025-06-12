@@ -1,4 +1,4 @@
-// pages/api/check-domain.js - Version basita w khadama
+// pages/api/check-domain.js - Version fixed bach ma idoblch extensions
 export default async function handler(req, res) {
   // Check method
   if (req.method !== 'POST') {
@@ -16,6 +16,29 @@ export default async function handler(req, res) {
     // Extensions li bghina ncheckiwhom
     const extensions = ['.net', '.co', '.co.in', '.in', '.us'];
     const results = [];
+
+    // Function bach nclean domain men ay extension
+    function cleanDomain(domain) {
+      let cleanedDomain = domain.trim().toLowerCase();
+      
+      // Remove any existing extensions
+      extensions.forEach(ext => {
+        // Remove extension if it's at the end
+        if (cleanedDomain.endsWith(ext)) {
+          cleanedDomain = cleanedDomain.slice(0, -ext.length);
+        }
+      });
+      
+      // Remove www. if exists
+      if (cleanedDomain.startsWith('www.')) {
+        cleanedDomain = cleanedDomain.slice(4);
+      }
+      
+      // Remove http:// or https://
+      cleanedDomain = cleanedDomain.replace(/^https?:\/\//, '');
+      
+      return cleanedDomain;
+    }
 
     // Function basita bach ncheck domain
     async function checkSingleDomain(domain) {
@@ -45,19 +68,26 @@ export default async function handler(req, res) {
 
     // Process kol domain
     for (let i = 0; i < domains.length; i++) {
-      const baseDomain = domains[i];
+      const inputDomain = domains[i];
       
-      if (!baseDomain || !baseDomain.trim()) {
+      if (!inputDomain || !inputDomain.trim()) {
         continue;
       }
 
-      const cleanDomain = baseDomain.trim();
+      // Clean domain men ay extension li dayez
+      const baseDomain = cleanDomain(inputDomain);
+      
+      // Skip empty domains after cleaning
+      if (!baseDomain) {
+        continue;
+      }
+
       const domainResults = [];
 
       // Check kol extension
       for (let j = 0; j < extensions.length; j++) {
         const ext = extensions[j];
-        const fullDomain = cleanDomain + ext;
+        const fullDomain = baseDomain + ext;
         
         try {
           const result = await checkSingleDomain(fullDomain);
@@ -69,7 +99,7 @@ export default async function handler(req, res) {
           });
           
           // Small delay bach ma-noverload-ch
-          await new Promise(resolve => setTimeout(resolve, 200));
+          await new Promise(resolve => setTimeout(resolve, 150));
           
         } catch (error) {
           // Ila error, nconsideraw domain taken
@@ -82,7 +112,8 @@ export default async function handler(req, res) {
       }
 
       results.push({
-        baseDomain: cleanDomain,
+        baseDomain: baseDomain,
+        originalInput: inputDomain,
         extensions: domainResults
       });
     }
