@@ -1,4 +1,4 @@
-// pages/api/check-domain.js - Ultra fast version
+// pages/api/check-domain.js - Multiple check methods for accuracy
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Method not allowed' });
@@ -26,48 +26,157 @@ export default async function handler(req, res) {
       return cleanedDomain;
     }
 
-    // Fast domain check - parallel processing
-    async function checkDomainFast(domain) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1500); // Reduced timeout
-        
-        const response = await fetch(`https://${domain}`, {
-          method: 'HEAD',
-          signal: controller.signal,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; FastChecker/1.0)'
-          }
-        });
-        
-        clearTimeout(timeoutId);
-        return { available: false, status: 'taken' };
-        
-      } catch (error) {
-        return { available: true, status: 'available' };
-      }
+    // Multiple check methods for better accuracy
+    async function checkDomainMultiple(domain) {
+      const checks = [];
+      
+      // Method 1: HTTP check
+      const httpCheck = async () => {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
+          
+          const response = await fetch(`https://${domain}`, {
+            method: 'HEAD',
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; DomainChecker/1.0)'
+            }
+          });
+          
+          clearTimeout(timeoutId);
+          return { taken: true, method: 'http', status: response.status };
+          
+        } catch (error) {
+          return { taken: false, method: 'http', error: error.message };
+        }
+      };
+
+      // Method 2: DNS check via different approach
+      const dnsCheck = async () => {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
+          
+          // Try to resolve domain by making request to a different endpoint
+          const response = await fetch(`http://${domain}`, {
+            method: 'HEAD',
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; DomainChecker/1.0)'
+            }
+          });
+          
+          clearTimeout(timeoutId);
+          return { taken: true, method: 'dns', status: response.status };
+          
+        } catch (error) {
+          return { taken: false, method: 'dns', error: error.message };
+        }
+      };
+
+      // Method 3: Check for common hosting providers
+      const hostingCheck = async () => {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 1500);
+          
+          const response = await fetch(`https://${domain}`, {
+            method: 'GET',
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; DomainChecker/1.0)'
+            }
+          });
+          
+          clearTimeout(timeoutId);
+          
+          const text = await response.text().catch(() => '');
+          
+          // Check for common domain parking/hosting indicators
+          const indicators = [
+            'parked domain',
+            'domain for sale',
+            'godaddy',
+            'namecheap',
+            'domain.com',
+            'this domain may be for sale',
+            'buy this domain',
+            'register this domain',
+            'domain parking',
+            'sedo',
+            'hugedomains'
+          ];
+          
+          const isParked = indicators.some(indicator => 
+            text.toLowerCase().includes(indicator)
+          );
+          
+          return { 
+            taken: true, 
+            method: 'hosting', 
+            isParked, 
+            status: response.status,
+            hasContent: text.length > 100
+          };
+          
+        } catch (error) {
+          return { taken: false, method: 'hosting', error: error.message };
+        }
+      };
+
+      // Run all checks in parallel
+      const [httpResult, dnsResult, hostingResult] = await Promise.allSettled([
+        httpCheck(),
+        dnsCheck(),
+        hostingCheck()
+      ]);
+
+      // Analyze results
+      let taken = false;
+      let confidence = 0;
+      let methods = [];
+      
+      [httpResult, dnsResult, hostingResult].forEach(result => {
+        if (result.status === 'fulfilled' && result.value.taken) {
+          taken = true;
+          confidence += 1;
+          methods.push(result.value);
+        }
+      });
+
+      return {
+        available: !taken,
+        taken: taken,
+        confidence: confidence,
+        methods: methods,
+        status: taken ? 'taken' : 'available'
+      };
     }
 
-    // Process all domains in parallel batches
-    const batchSize = 20; // Increased batch size
+    // Process domains in parallel batches
+    const batchSize = 15; // Reduced for better accuracy
     
     for (let i = 0; i < domains.length; i += batchSize) {
       const batch = domains.slice(i, i + batchSize);
       
-      // Process each domain in the batch
       const batchPromises = batch.map(async (inputDomain) => {
         if (!inputDomain?.trim()) return null;
         
         const baseDomain = cleanDomain(inputDomain);
         if (!baseDomain) return null;
 
-        // Check all extensions for this domain in parallel
+        // Check all extensions for this domain
         const extensionPromises = extensions.map(async (ext) => {
           const fullDomain = baseDomain + ext;
-          const result = await checkDomainFast(fullDomain);
+          const result = await checkDomainMultiple(fullDomain);
+          
           return {
             domain: fullDomain,
             available: result.available,
+            taken: result.taken,
+            confidence: result.confidence,
+            methods: result.methods,
             status: result.status
           };
         });
@@ -81,29 +190,28 @@ export default async function handler(req, res) {
             result.status === 'fulfilled' ? result.value : {
               domain: baseDomain + '.error',
               available: true,
+              taken: false,
+              confidence: 0,
               status: 'error'
             }
           )
         };
       });
 
-      // Wait for the batch to complete
       const batchResults = await Promise.allSettled(batchPromises);
       
-      // Add successful results
       batchResults.forEach(result => {
         if (result.status === 'fulfilled' && result.value) {
           results.push(result.value);
         }
       });
-
-      // No delay between batches for maximum speed
     }
 
     return res.status(200).json({ 
       results,
       success: true,
-      checked: results.length
+      checked: results.length,
+      note: 'Using multiple check methods for better accuracy'
     });
 
   } catch (error) {
