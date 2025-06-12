@@ -17,13 +17,13 @@ export default function BulkDomainChecker() {
     setLoading(true);
     setResults([]);
     
-    // Process domains in larger batches for speed
-    const batchSize = 50; // Bigger batches
+    // Process domains in batches of 10 for better performance
+    const batchSize = 10;
     const allTakenDomains = [];
 
     for (let i = 0; i < domainList.length; i += batchSize) {
       const batch = domainList.slice(i, i + batchSize);
-      setCurrentDomain(`⚡ Processing ${i + 1}-${Math.min(i + batchSize, domainList.length)} of ${domainList.length}`);
+      setCurrentDomain(`Processing ${i + 1}-${Math.min(i + batchSize, domainList.length)} of ${domainList.length}`);
       
       try {
         const response = await fetch('/api/check-domain', {
@@ -36,16 +36,14 @@ export default function BulkDomainChecker() {
 
         const data = await response.json();
         
-        // Collect only taken domains from this batch with confidence
+        // Collect only taken domains from this batch
         const batchTakenDomains = [];
         data.results.forEach(result => {
           result.extensions.forEach(ext => {
-            if (ext.taken && ext.confidence > 0) { // Only show domains with confidence
+            if (!ext.available) {
               batchTakenDomains.push({
                 domain: ext.domain,
-                status: 'TAKEN',
-                confidence: ext.confidence,
-                methods: ext.methods?.length || 0
+                status: 'TAKEN'
               });
             }
           });
@@ -60,7 +58,10 @@ export default function BulkDomainChecker() {
         );
         setResults([...uniqueDomains]);
         
-        // No delay between batches for maximum speed
+        // Short delay between batches
+        if (i + batchSize < domainList.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
         
       } catch (error) {
         console.error('Error checking batch:', error);
@@ -229,7 +230,6 @@ export default function BulkDomainChecker() {
                     <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #ddd', width: '60px' }}>#</th>
                     <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Domain</th>
                     <th style={{ padding: '12px', textAlign: 'center', borderBottom: '1px solid #ddd', width: '100px' }}>Status</th>
-                    <th style={{ padding: '12px', textAlign: 'center', borderBottom: '1px solid #ddd', width: '80px' }}>Confidence</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -251,18 +251,6 @@ export default function BulkDomainChecker() {
                           fontWeight: 'bold'
                         }}>
                           TAKEN
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                        <span style={{
-                          background: result.confidence >= 2 ? '#28a745' : result.confidence >= 1 ? '#ffc107' : '#6c757d',
-                          color: result.confidence >= 2 ? 'white' : result.confidence >= 1 ? 'black' : 'white',
-                          padding: '3px 6px',
-                          borderRadius: '3px',
-                          fontSize: '10px',
-                          fontWeight: 'bold'
-                        }}>
-                          {result.confidence}/3
                         </span>
                       </td>
                     </tr>
@@ -306,4 +294,142 @@ export default function BulkDomainChecker() {
       `}</style>
     </>
   );
+}
+
+## 5. pages/api/check-domain.js
+// pages/api/check-domain.js - Version fixed bach ma idoblch extensions
+export default async function handler(req, res) {
+  // Check method
+  if (req.method !== 'POST') {
+    return res.status(405).json({ message: 'Method not allowed' });
+  }
+
+  try {
+    const { domains } = req.body;
+
+    // Validate input
+    if (!domains || !Array.isArray(domains)) {
+      return res.status(400).json({ message: 'Domains array is required' });
+    }
+
+    // Extensions li bghina ncheckiwhom
+    const extensions = ['.net', '.co', '.co.in', '.in', '.us'];
+    const results = [];
+
+    // Function bach nclean domain men ay extension
+    function cleanDomain(domain) {
+      let cleanedDomain = domain.trim().toLowerCase();
+      
+      // Remove any existing extensions
+      extensions.forEach(ext => {
+        // Remove extension if it's at the end
+        if (cleanedDomain.endsWith(ext)) {
+          cleanedDomain = cleanedDomain.slice(0, -ext.length);
+        }
+      });
+      
+      // Remove www. if exists
+      if (cleanedDomain.startsWith('www.')) {
+        cleanedDomain = cleanedDomain.slice(4);
+      }
+      
+      // Remove http:// or https://
+      cleanedDomain = cleanedDomain.replace(/^https?:\/\//, '');
+      
+      return cleanedDomain;
+    }
+
+    // Function basita bach ncheck domain
+    async function checkSingleDomain(domain) {
+      try {
+        // Njarrbu n-fetch l'domain
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        
+        const response = await fetch(`https://${domain}`, {
+          method: 'HEAD',
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; DomainChecker/1.0)'
+          }
+        });
+        
+        clearTimeout(timeoutId);
+        
+        // Ila response jat, domain taken
+        return { available: false, status: 'taken' };
+        
+      } catch (error) {
+        // Ila error jat, domain available (probably)
+        return { available: true, status: 'available' };
+      }
+    }
+
+    // Process kol domain
+    for (let i = 0; i < domains.length; i++) {
+      const inputDomain = domains[i];
+      
+      if (!inputDomain || !inputDomain.trim()) {
+        continue;
+      }
+
+      // Clean domain men ay extension li dayez
+      const baseDomain = cleanDomain(inputDomain);
+      
+      // Skip empty domains after cleaning
+      if (!baseDomain) {
+        continue;
+      }
+
+      const domainResults = [];
+
+      // Check kol extension
+      for (let j = 0; j < extensions.length; j++) {
+        const ext = extensions[j];
+        const fullDomain = baseDomain + ext;
+        
+        try {
+          const result = await checkSingleDomain(fullDomain);
+          
+          domainResults.push({
+            domain: fullDomain,
+            available: result.available,
+            status: result.status
+          });
+          
+          // Small delay bach ma-noverload-ch
+          await new Promise(resolve => setTimeout(resolve, 150));
+          
+        } catch (error) {
+          // Ila error, nconsideraw domain taken
+          domainResults.push({
+            domain: fullDomain,
+            available: false,
+            status: 'error'
+          });
+        }
+      }
+
+      results.push({
+        baseDomain: baseDomain,
+        originalInput: inputDomain,
+        extensions: domainResults
+      });
+    }
+
+    // Return results
+    return res.status(200).json({ 
+      results,
+      success: true,
+      checked: results.length
+    });
+
+  } catch (error) {
+    console.error('API Error:', error);
+    return res.status(500).json({ 
+      message: 'Server error',
+      error: error.message,
+      success: false
+    });
+  }
 }
