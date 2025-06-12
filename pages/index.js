@@ -17,13 +17,13 @@ export default function BulkDomainChecker() {
     setLoading(true);
     setResults([]);
     
-    // Process domains in batches of 10 for better performance
-    const batchSize = 10;
+    // Process domains in larger batches for speed
+    const batchSize = 50; // Bigger batches
     const allTakenDomains = [];
 
     for (let i = 0; i < domainList.length; i += batchSize) {
       const batch = domainList.slice(i, i + batchSize);
-      setCurrentDomain(`Processing ${i + 1}-${Math.min(i + batchSize, domainList.length)} of ${domainList.length}`);
+      setCurrentDomain(`⚡ Processing ${i + 1}-${Math.min(i + batchSize, domainList.length)} of ${domainList.length}`);
       
       try {
         const response = await fetch('/api/check-domain', {
@@ -58,10 +58,7 @@ export default function BulkDomainChecker() {
         );
         setResults([...uniqueDomains]);
         
-        // Short delay between batches
-        if (i + batchSize < domainList.length) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
+        // No delay between batches for maximum speed
         
       } catch (error) {
         console.error('Error checking batch:', error);
