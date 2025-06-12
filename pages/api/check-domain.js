@@ -1,3 +1,4 @@
+// pages/api/check-domain.js
 import dns from 'dns';
 import { promisify } from 'util';
 
@@ -14,7 +15,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ message: 'Domains array is required' });
   }
 
-  const extensions = ['.com', '.net', '.org', '.co', '.info', '.biz', '.me', '.io', '.ai', '.tech', '.online', '.site', '.website', '.store', '.app', '.dev'];
+  // Only the extensions you want to check
+  const extensions = ['.net', '.co', '.co.in', '.in', '.us'];
   const results = [];
 
   // Process each domain
