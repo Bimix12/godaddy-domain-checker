@@ -1,27 +1,35 @@
 import { useState } from 'react';
 import Head from 'next/head';
 
-export default function DomainChecker() {
-  const [domain, setDomain] = useState('');
+export default function BulkDomainChecker() {
+  const [domains, setDomains] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   const checkDomains = async (e) => {
     e.preventDefault();
-    if (!domain.trim()) return;
+    if (!domains.trim()) return;
+
+    const domainList = domains.split('\n').filter(d => d.trim());
+    if (domainList.length === 0) return;
 
     setLoading(true);
+    setProgress(0);
+    setResults([]);
+
     try {
       const response = await fetch('/api/check-domain', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ domain: domain.trim() }),
+        body: JSON.stringify({ domains: domainList }),
       });
 
       const data = await response.json();
       setResults(data.results || []);
+      setProgress(100);
     } catch (error) {
       console.error('Error checking domains:', error);
       alert('Error checking domains');
@@ -30,58 +38,119 @@ export default function DomainChecker() {
     }
   };
 
+  const exportResults = () => {
+    let csvContent = "Domain,Extension,Status\n";
+    results.forEach(result => {
+      result.extensions.forEach(ext => {
+        csvContent += `${result.baseDomain},${ext.domain.replace(result.baseDomain, '')},${ext.status}\n`;
+      });
+    });
+    
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'domain_results.csv';
+    a.click();
+  };
+
+  const availableCount = results.reduce((count, result) => 
+    count + result.extensions.filter(ext => ext.available).length, 0
+  );
+
+  const takenCount = results.reduce((count, result) => 
+    count + result.extensions.filter(ext => !ext.available).length, 0
+  );
+
   return (
     <>
       <Head>
-        <title>Domain Checker - Find Available Domains</title>
-        <meta name="description" content="Check domain availability with different extensions" />
+        <title>Bulk Domain Checker - Check Multiple Domains</title>
+        <meta name="description" content="Check multiple domain availability with different extensions" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
 
       <div className="container">
         <header className="header">
-          <h1>🌐 Domain Checker</h1>
-          <p>Search for available domains with different extensions</p>
+          <h1>🚀 Bulk Domain Checker</h1>
+          <p>Check multiple domains across various extensions at once</p>
         </header>
 
         <form onSubmit={checkDomains} className="search-form">
-          <div className="input-group">
-            <input
-              type="text"
-              value={domain}
-              onChange={(e) => setDomain(e.target.value)}
-              placeholder="Enter domain name (without extension)"
-              className="domain-input"
+          <div className="input-section">
+            <label htmlFor="domains">Enter domain names (one per line, without extensions):</label>
+            <textarea
+              id="domains"
+              value={domains}
+              onChange={(e) => setDomains(e.target.value)}
+              placeholder={`example:\nmysite\ncoolname\nbusinessname\nstartup`}
+              className="domain-textarea"
               disabled={loading}
+              rows={8}
             />
-            <button type="submit" disabled={loading || !domain.trim()} className="search-btn">
-              {loading ? 'Searching...' : 'Search'}
-            </button>
+            <div className="form-actions">
+              <button type="submit" disabled={loading || !domains.trim()} className="search-btn">
+                {loading ? `Checking... ${progress}%` : 'Check All Domains'}
+              </button>
+              {results.length > 0 && (
+                <button type="button" onClick={exportResults} className="export-btn">
+                  Export CSV
+                </button>
+              )}
+            </div>
           </div>
         </form>
 
+        {loading && (
+          <div className="progress-bar">
+            <div className="progress-fill" style={{width: `${progress}%`}}></div>
+          </div>
+        )}
+
+        {results.length > 0 && (
+          <div className="stats">
+            <div className="stat-card available">
+              <h3>{availableCount}</h3>
+              <p>Available</p>
+            </div>
+            <div className="stat-card taken">
+              <h3>{takenCount}</h3>
+              <p>Taken</p>
+            </div>
+            <div className="stat-card total">
+              <h3>{results.length}</h3>
+              <p>Domains Checked</p>
+            </div>
+          </div>
+        )}
+
         {results.length > 0 && (
           <div className="results">
-            <h2>Search Results:</h2>
-            <div className="results-grid">
-              {results.map((result, index) => (
-                <div
-                  key={index}
-                  className={`result-card ${result.available ? 'available' : 'taken'}`}
-                >
-                  <span className="domain-name">{result.domain}</span>
-                  <span className={`status ${result.available ? 'available' : 'taken'}`}>
-                    {result.available ? '✅ Available' : '❌ Taken'}
-                  </span>
+            <h2>Results ({results.length} domains checked):</h2>
+            {results.map((result, index) => (
+              <div key={index} className="domain-group">
+                <h3 className="domain-base">{result.baseDomain}</h3>
+                <div className="extensions-grid">
+                  {result.extensions.map((ext, extIndex) => (
+                    <div
+                      key={extIndex}
+                      className={`extension-card ${ext.available ? 'available' : 'taken'}`}
+                    >
+                      <span className="domain-name">{ext.domain}</span>
+                      <span className={`status ${ext.available ? 'available' : 'taken'}`}>
+                        {ext.available ? '✅' : '❌'}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
         )}
 
         <style jsx>{`
           .container {
-            max-width: 800px;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
             font-family: 'Arial', sans-serif;
@@ -114,31 +183,38 @@ export default function DomainChecker() {
             margin-bottom: 30px;
           }
 
-          .input-group {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
+          .input-section label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: bold;
+            color: #333;
           }
 
-          .domain-input {
-            flex: 1;
+          .domain-textarea {
+            width: 100%;
             padding: 15px;
             border: 2px solid #ddd;
             border-radius: 8px;
             font-size: 16px;
-            min-width: 250px;
+            font-family: monospace;
+            resize: vertical;
             transition: border-color 0.3s;
           }
 
-          .domain-input:focus {
+          .domain-textarea:focus {
             outline: none;
             border-color: #667eea;
           }
 
-          .search-btn {
+          .form-actions {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+          }
+
+          .search-btn, .export-btn {
             padding: 15px 30px;
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            color: white;
             border: none;
             border-radius: 8px;
             font-size: 16px;
@@ -147,7 +223,19 @@ export default function DomainChecker() {
             white-space: nowrap;
           }
 
-          .search-btn:hover:not(:disabled) {
+          .search-btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            flex: 1;
+            min-width: 200px;
+          }
+
+          .export-btn {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            color: white;
+          }
+
+          .search-btn:hover:not(:disabled), .export-btn:hover {
             transform: translateY(-2px);
           }
 
@@ -155,6 +243,44 @@ export default function DomainChecker() {
             opacity: 0.6;
             cursor: not-allowed;
           }
+
+          .progress-bar {
+            background: rgba(255,255,255,0.2);
+            border-radius: 10px;
+            padding: 3px;
+            margin-bottom: 20px;
+          }
+
+          .progress-fill {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            height: 20px;
+            border-radius: 7px;
+            transition: width 0.3s ease;
+          }
+
+          .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+          }
+
+          .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+          }
+
+          .stat-card h3 {
+            font-size: 2rem;
+            margin-bottom: 5px;
+          }
+
+          .stat-card.available h3 { color: #22c55e; }
+          .stat-card.taken h3 { color: #ef4444; }
+          .stat-card.total h3 { color: #667eea; }
 
           .results {
             background: white;
@@ -164,61 +290,58 @@ export default function DomainChecker() {
           }
 
           .results h2 {
-            margin-bottom: 20px;
+            margin-bottom: 30px;
             color: #333;
             text-align: center;
           }
 
-          .results-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 15px;
+          .domain-group {
+            margin-bottom: 30px;
+            border: 1px solid #eee;
+            border-radius: 10px;
+            padding: 20px;
           }
 
-          .result-card {
+          .domain-base {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 10px;
+          }
+
+          .extensions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+          }
+
+          .extension-card {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 15px;
-            border-radius: 8px;
-            border: 2px solid;
-            transition: transform 0.2s;
+            padding: 10px 15px;
+            border-radius: 6px;
+            border: 1px solid;
+            font-size: 0.9rem;
           }
 
-          .result-card:hover {
-            transform: translateY(-2px);
-          }
-
-          .result-card.available {
+          .extension-card.available {
             background: #f0fff4;
             border-color: #22c55e;
           }
 
-          .result-card.taken {
+          .extension-card.taken {
             background: #fef2f2;
             border-color: #ef4444;
           }
 
           .domain-name {
-            font-weight: bold;
-            font-size: 1.1rem;
+            font-weight: 500;
           }
 
           .status {
-            font-weight: bold;
-            padding: 5px 10px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-          }
-
-          .status.available {
-            background: #22c55e;
-            color: white;
-          }
-
-          .status.taken {
-            background: #ef4444;
-            color: white;
+            font-size: 1.1rem;
           }
 
           @media (max-width: 768px) {
@@ -230,19 +353,19 @@ export default function DomainChecker() {
               font-size: 2rem;
             }
 
-            .input-group {
+            .form-actions {
               flex-direction: column;
             }
 
-            .domain-input {
+            .search-btn {
               min-width: 100%;
             }
 
-            .search-btn {
-              width: 100%;
+            .extensions-grid {
+              grid-template-columns: 1fr;
             }
 
-            .results-grid {
+            .stats {
               grid-template-columns: 1fr;
             }
           }
