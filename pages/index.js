@@ -36,14 +36,16 @@ export default function BulkDomainChecker() {
 
         const data = await response.json();
         
-        // Collect only taken domains from this batch
+        // Collect only taken domains from this batch with confidence
         const batchTakenDomains = [];
         data.results.forEach(result => {
           result.extensions.forEach(ext => {
-            if (!ext.available) {
+            if (ext.taken && ext.confidence > 0) { // Only show domains with confidence
               batchTakenDomains.push({
                 domain: ext.domain,
-                status: 'TAKEN'
+                status: 'TAKEN',
+                confidence: ext.confidence,
+                methods: ext.methods?.length || 0
               });
             }
           });
@@ -227,6 +229,7 @@ export default function BulkDomainChecker() {
                     <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #ddd', width: '60px' }}>#</th>
                     <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Domain</th>
                     <th style={{ padding: '12px', textAlign: 'center', borderBottom: '1px solid #ddd', width: '100px' }}>Status</th>
+                    <th style={{ padding: '12px', textAlign: 'center', borderBottom: '1px solid #ddd', width: '80px' }}>Confidence</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -248,6 +251,18 @@ export default function BulkDomainChecker() {
                           fontWeight: 'bold'
                         }}>
                           TAKEN
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                        <span style={{
+                          background: result.confidence >= 2 ? '#28a745' : result.confidence >= 1 ? '#ffc107' : '#6c757d',
+                          color: result.confidence >= 2 ? 'white' : result.confidence >= 1 ? 'black' : 'white',
+                          padding: '3px 6px',
+                          borderRadius: '3px',
+                          fontSize: '10px',
+                          fontWeight: 'bold'
+                        }}>
+                          {result.confidence}/3
                         </span>
                       </td>
                     </tr>
