@@ -1,6 +1,5 @@
-// pages/api/check-domain.js - Version fixed bach ma idoblch extensions
+// pages/api/check-domain.js - Ultra fast version
 export default async function handler(req, res) {
-  // Check method
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Method not allowed' });
   }
@@ -8,117 +7,99 @@ export default async function handler(req, res) {
   try {
     const { domains } = req.body;
 
-    // Validate input
     if (!domains || !Array.isArray(domains)) {
       return res.status(400).json({ message: 'Domains array is required' });
     }
 
-    // Extensions li bghina ncheckiwhom
     const extensions = ['.net', '.co', '.co.in', '.in', '.us'];
     const results = [];
 
-    // Function bach nclean domain men ay extension
+    // Function bach nclean domain
     function cleanDomain(domain) {
       let cleanedDomain = domain.trim().toLowerCase();
-      
-      // Remove any existing extensions
       extensions.forEach(ext => {
-        // Remove extension if it's at the end
         if (cleanedDomain.endsWith(ext)) {
           cleanedDomain = cleanedDomain.slice(0, -ext.length);
         }
       });
-      
-      // Remove www. if exists
-      if (cleanedDomain.startsWith('www.')) {
-        cleanedDomain = cleanedDomain.slice(4);
-      }
-      
-      // Remove http:// or https://
-      cleanedDomain = cleanedDomain.replace(/^https?:\/\//, '');
-      
+      cleanedDomain = cleanedDomain.replace(/^(https?:\/\/)?(www\.)?/, '');
       return cleanedDomain;
     }
 
-    // Function basita bach ncheck domain
-    async function checkSingleDomain(domain) {
+    // Fast domain check - parallel processing
+    async function checkDomainFast(domain) {
       try {
-        // Njarrbu n-fetch l'domain
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const timeoutId = setTimeout(() => controller.abort(), 1500); // Reduced timeout
         
         const response = await fetch(`https://${domain}`, {
           method: 'HEAD',
           signal: controller.signal,
           headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; DomainChecker/1.0)'
+            'User-Agent': 'Mozilla/5.0 (compatible; FastChecker/1.0)'
           }
         });
         
         clearTimeout(timeoutId);
-        
-        // Ila response jat, domain taken
         return { available: false, status: 'taken' };
         
       } catch (error) {
-        // Ila error jat, domain available (probably)
         return { available: true, status: 'available' };
       }
     }
 
-    // Process kol domain
-    for (let i = 0; i < domains.length; i++) {
-      const inputDomain = domains[i];
+    // Process all domains in parallel batches
+    const batchSize = 20; // Increased batch size
+    
+    for (let i = 0; i < domains.length; i += batchSize) {
+      const batch = domains.slice(i, i + batchSize);
       
-      if (!inputDomain || !inputDomain.trim()) {
-        continue;
-      }
-
-      // Clean domain men ay extension li dayez
-      const baseDomain = cleanDomain(inputDomain);
-      
-      // Skip empty domains after cleaning
-      if (!baseDomain) {
-        continue;
-      }
-
-      const domainResults = [];
-
-      // Check kol extension
-      for (let j = 0; j < extensions.length; j++) {
-        const ext = extensions[j];
-        const fullDomain = baseDomain + ext;
+      // Process each domain in the batch
+      const batchPromises = batch.map(async (inputDomain) => {
+        if (!inputDomain?.trim()) return null;
         
-        try {
-          const result = await checkSingleDomain(fullDomain);
-          
-          domainResults.push({
+        const baseDomain = cleanDomain(inputDomain);
+        if (!baseDomain) return null;
+
+        // Check all extensions for this domain in parallel
+        const extensionPromises = extensions.map(async (ext) => {
+          const fullDomain = baseDomain + ext;
+          const result = await checkDomainFast(fullDomain);
+          return {
             domain: fullDomain,
             available: result.available,
             status: result.status
-          });
-          
-          // Small delay bach ma-noverload-ch
-          await new Promise(resolve => setTimeout(resolve, 150));
-          
-        } catch (error) {
-          // Ila error, nconsideraw domain taken
-          domainResults.push({
-            domain: fullDomain,
-            available: false,
-            status: 'error'
-          });
-        }
-      }
+          };
+        });
 
-      results.push({
-        baseDomain: baseDomain,
-        originalInput: inputDomain,
-        extensions: domainResults
+        const extensionResults = await Promise.allSettled(extensionPromises);
+        
+        return {
+          baseDomain,
+          originalInput: inputDomain,
+          extensions: extensionResults.map(result => 
+            result.status === 'fulfilled' ? result.value : {
+              domain: baseDomain + '.error',
+              available: true,
+              status: 'error'
+            }
+          )
+        };
       });
+
+      // Wait for the batch to complete
+      const batchResults = await Promise.allSettled(batchPromises);
+      
+      // Add successful results
+      batchResults.forEach(result => {
+        if (result.status === 'fulfilled' && result.value) {
+          results.push(result.value);
+        }
+      });
+
+      // No delay between batches for maximum speed
     }
 
-    // Return results
     return res.status(200).json({ 
       results,
       success: true,
