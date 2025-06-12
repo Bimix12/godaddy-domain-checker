@@ -1,4 +1,4 @@
-// pages/api/check-domain.js - Version fixed bach ma idoblch extensions
+// pages/api/check-domain.js - Real Domain Availability Checker
 export default async function handler(req, res) {
   // Check method
   if (req.method !== 'POST') {
@@ -17,13 +17,15 @@ export default async function handler(req, res) {
     const extensions = ['.net', '.co', '.co.in', '.in', '.us'];
     const results = [];
 
+    // Your RapidAPI key
+    const RAPIDAPI_KEY = "dLYuzkosMXb5_5w8r1GAw2ES94SwM4onm5a";
+
     // Function bach nclean domain men ay extension
     function cleanDomain(domain) {
       let cleanedDomain = domain.trim().toLowerCase();
       
       // Remove any existing extensions
       extensions.forEach(ext => {
-        // Remove extension if it's at the end
         if (cleanedDomain.endsWith(ext)) {
           cleanedDomain = cleanedDomain.slice(0, -ext.length);
         }
@@ -40,94 +42,71 @@ export default async function handler(req, res) {
       return cleanedDomain;
     }
 
-    // Function basita bach ncheck domain using multiple methods
+    // Function bach ncheck domain availability using RapidAPI
     async function checkSingleDomain(domain) {
-      // Method 1: Check with HTTP request
-      let httpCheck = { available: true, method: 'http' };
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000); // Reduced timeout
-        
-        const response = await fetch(`https://${domain}`, {
-          method: 'HEAD',
-          signal: controller.signal,
+        const response = await fetch(`https://domain-availability-api.p.rapidapi.com/check`, {
+          method: 'POST',
           headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; DomainChecker/1.0)'
-          }
+            'Content-Type': 'application/json',
+            'X-RapidAPI-Key': RAPIDAPI_KEY,
+            'X-RapidAPI-Host': 'domain-availability-api.p.rapidapi.com'
+          },
+          body: JSON.stringify({
+            domain: domain
+          })
         });
-        
-        clearTimeout(timeoutId);
-        
-        // Ila response jat o status code mzyan, domain taken
-        if (response.status >= 200 && response.status < 400) {
-          httpCheck = { available: false, method: 'http', status: response.status };
-        }
-        
-      } catch (error) {
-        // HTTP failed, might be available
-        httpCheck = { available: true, method: 'http', error: error.name };
-      }
 
-      // Method 2: Try HTTPS with www
-      let wwwCheck = { available: true, method: 'www' };
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        if (!response.ok) {
+          throw new Error(`API responded with status: ${response.status}`);
+        }
+
+        const data = await response.json();
         
-        const response = await fetch(`https://www.${domain}`, {
-          method: 'HEAD',
-          signal: controller.signal,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; DomainChecker/1.0)'
+        return {
+          available: data.available || false,
+          status: data.available ? 'available' : 'taken',
+          api_response: data
+        };
+
+      } catch (error) {
+        console.error(`Error checking ${domain}:`, error);
+        
+        // Fallback: Use WHOIS alternative API
+        try {
+          const whoisResponse = await fetch(`https://domain-whois-api.p.rapidapi.com/whois`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-RapidAPI-Key': RAPIDAPI_KEY,
+              'X-RapidAPI-Host': 'domain-whois-api.p.rapidapi.com'
+            },
+            body: JSON.stringify({
+              domain: domain
+            })
+          });
+
+          if (whoisResponse.ok) {
+            const whoisData = await whoisResponse.json();
+            const isAvailable = !whoisData.registered || whoisData.status === 'AVAILABLE';
+            
+            return {
+              available: isAvailable,
+              status: isAvailable ? 'available' : 'taken',
+              method: 'whois_fallback'
+            };
           }
-        });
-        
-        clearTimeout(timeoutId);
-        
-        if (response.status >= 200 && response.status < 400) {
-          wwwCheck = { available: false, method: 'www', status: response.status };
+        } catch (whoisError) {
+          console.error(`WHOIS fallback failed for ${domain}:`, whoisError);
         }
-        
-      } catch (error) {
-        wwwCheck = { available: true, method: 'www', error: error.name };
-      }
 
-      // Method 3: Try HTTP (not HTTPS)
-      let httpPlainCheck = { available: true, method: 'http-plain' };
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
-        
-        const response = await fetch(`http://${domain}`, {
-          method: 'HEAD',
-          signal: controller.signal,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; DomainChecker/1.0)'
-          }
-        });
-        
-        clearTimeout(timeoutId);
-        
-        if (response.status >= 200 && response.status < 400) {
-          httpPlainCheck = { available: false, method: 'http-plain', status: response.status };
-        }
-        
-      } catch (error) {
-        httpPlainCheck = { available: true, method: 'http-plain', error: error.name };
+        // If both APIs fail, return error status
+        return {
+          available: false,
+          status: 'error',
+          error: error.message
+        };
       }
-
-      // Decision logic: Ila chi method galt domain taken, consideriha taken
-      const isTaken = !httpCheck.available || !wwwCheck.available || !httpPlainCheck.available;
-      
-      return { 
-        available: !isTaken, 
-        status: isTaken ? 'taken' : 'available',
-        checks: {
-          https: httpCheck,
-          www: wwwCheck,
-          http: httpPlainCheck
-        }
-      };
     }
 
     // Process kol domain
@@ -159,18 +138,20 @@ export default async function handler(req, res) {
           domainResults.push({
             domain: fullDomain,
             available: result.available,
-            status: result.status
+            status: result.status,
+            method: result.method || 'api'
           });
           
-          // Small delay bach ma-noverload-ch (reduced delay)
-          await new Promise(resolve => setTimeout(resolve, 100));
+          // Delay bach ma-noverload-ch l'API
+          await new Promise(resolve => setTimeout(resolve, 500));
           
         } catch (error) {
-          // Ila error, nconsideraw domain taken
+          console.error(`Error processing ${fullDomain}:`, error);
           domainResults.push({
             domain: fullDomain,
             available: false,
-            status: 'error'
+            status: 'error',
+            error: error.message
           });
         }
       }
@@ -182,11 +163,22 @@ export default async function handler(req, res) {
       });
     }
 
+    // Count available vs taken
+    const allDomains = results.flatMap(r => r.extensions);
+    const availableCount = allDomains.filter(d => d.available).length;
+    const takenCount = allDomains.filter(d => d.status === 'taken').length;
+    const errorCount = allDomains.filter(d => d.status === 'error').length;
+
     // Return results
     return res.status(200).json({ 
       results,
       success: true,
-      checked: results.length
+      summary: {
+        total_checked: allDomains.length,
+        available: availableCount,
+        taken: takenCount,
+        errors: errorCount
+      }
     });
 
   } catch (error) {
@@ -198,3 +190,32 @@ export default async function handler(req, res) {
     });
   }
 }
+
+// Alternative: Using Domain Name API (another option)
+// Uncomment if you want to use this service instead
+/*
+async function checkDomainAlternative(domain) {
+  try {
+    const response = await fetch(`https://domainr.p.rapidapi.com/v2/status`, {
+      method: 'GET',
+      headers: {
+        'X-RapidAPI-Key': RAPIDAPI_KEY,
+        'X-RapidAPI-Host': 'domainr.p.rapidapi.com'
+      },
+      params: {
+        domain: domain
+      }
+    });
+
+    const data = await response.json();
+    
+    return {
+      available: data.status[0].status === 'available',
+      status: data.status[0].status,
+      api_response: data
+    };
+  } catch (error) {
+    throw error;
+  }
+}
+*/
